@@ -1,0 +1,386 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-02-22"
+editor_options: 
+  chunk_output_type: console
+---
+NOTE:
+
+- the model simulates 1 and 2 right now, so should the agents responses match that? 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+```
+
+```{r}
+library(pacman)
+pacman::p_load(rstan,
+               ggplot2)
+
+```
+
+# Simulating data
+**Rescorla-Wagner** in R.
+
+Simulate some data first:
+```{r simulate_data}
+# Simulate opponent's choices
+opponent_choices <- rbinom(n = 100, size = 1, prob = 0.7)
+
+# Display the first few opponent choices
+head(opponent_choices)
+
+```
+
+```{r simulate_responses}
+# Parameters
+tau <- 2  # Temperature parameter for softmax function
+alpha <- 0.3  # Learning rate
+
+# Initialize values
+choice <- numeric(length(opponent_choices)) # initializing a vector of zeros the length of how many choices we have
+choice[1] <- rbinom(1,
+                    size = 1, 
+                    prob = 0.5)  # First choice randomly sampled
+
+# ----- The Recorla-Wagner model
+# Initialize values for the Rescorla-Wagner model
+v <- c(0.5, 
+       0.5)  # Initial values for the agent's choices (heads and tails)
+
+rewards <- numeric(length(opponent_choices)) # initializing a vector of zeros the length of how many choices we have
+
+# Simulate agent's responses
+for (t in 2:length(opponent_choices)) {  # Starting from the second round
+  
+  # Calculate reward
+  if (opponent_choices[t - 1] == choice[t - 1]) {
+    reward <- 1
+  } else {
+    reward <- -1
+  }
+  rewards[t - 1] <- reward
+  
+  # Rescorla-Wagner model
+  pe <- rewards[t - 1] - v[choice[t - 1] + 1]
+  
+  v[choice[t - 1] + 1] <- v[choice[t - 1] + 1] + alpha * pe
+  
+  # Update choice based on softmax
+  prob_head <- 1 - exp(tau * v[1]) / (exp(tau * v[1]) + exp(tau * v[2]))
+  choice[t] <- rbinom(1, size = 1, prob = prob_head)
+}
+
+# Display the rewards, choices, and updated values
+print(rewards)
+print(choice)
+print(v)
+
+choice = choice + 1
+
+```
+
+```{r}
+## Create the data. N.B. note the two variables have different lengths: 1 for n, n for h.
+data <- list(
+  nTrials = 100,  # n of trials
+  choice = choice,
+  reward = rewards 
+)
+
+```
+
+```{r}
+#modelFile <- 'my_RW.stan'
+modelFile <- 'my_RW_w_genquan_run.stan'
+
+nIter     <- 2000
+nChains   <- 4 
+nWarmup   <- floor(nIter/2)
+nThin     <- 1
+
+cat("Estimating", modelFile, "model... \n")
+startTime = Sys.time(); print(startTime)
+cat("Calling", nChains, "simulations in Stan... \n")
+
+fit_rl <- stan(modelFile, 
+               data    = data, 
+               chains  = nChains,
+               iter    = nIter,
+               warmup  = nWarmup,
+               thin    = nThin,
+               init    = "random",
+               seed    = 1450154626)
+
+cat("Finishing", modelFile, "model simulation ... \n")
+endTime = Sys.time()
+print(endTime)
+
+# Corrected time difference display
+time_difference <- endTime - startTime
+cat("It took", as.numeric(time_difference, units = "secs"), "seconds\n")
+
+```
+
+## Inspect
+```{r}
+
+# Get summary of model
+print(fit_rl)
+    
+# Trace
+plot_trace_excl_warm_up <- stan_trace(fit_rl, 
+                                      pars = c('alpha','tau'), 
+                                      inc_warmup = F)
+
+plot_trace_excl_warm_up
+
+# Density plot of pars
+plot_dens <- stan_plot(fit_rl, 
+                       pars=c('alpha','tau'), 
+                       show_density=T, 
+                       fill_color = 'skyblue')
+
+plot_dens
+```
+
+# Prior / Predictive checks
+```{r}
+# Extract simulated choice data from model output
+posterior_choices <- extract(fit_rl)$choice_sim
+
+# Calculate summary statistics or visualize these choices
+# For example, comparing the mean of the simulated choices to the observed mean
+observed_mean <- mean(data$choice)
+simulated_means <- apply(posterior_choices, 
+                         2, 
+                         mean)
+
+# Plotting
+hist(simulated_means, 
+     main="Posterior Predictive Means of Choices", 
+     xlab="Mean Choice",
+     xlim=c(1.0, 2.0))
+abline(v = observed_mean, col="red", lwd=2)
+legend("topright", "Observed Mean", col="red", lwd=2)
+
+```
+
+## Alpha prior-post-plots
+```{r}
+
+# The fit_rl is our fitted Stan model object
+posterior_alpha <- extract(fit_rl)$alpha
+
+# Sample from the prior distribution for alpha
+prior_alpha <- rbeta(10000, 1, 1)  # beta(1, 1) prior
+
+# Create a data frame for ggplot
+alpha_data <- data.frame(
+  value = c(prior_alpha, posterior_alpha),
+  distribution = factor(c(rep("Prior", length(prior_alpha)), rep("Posterior", length(posterior_alpha))))
+)
+
+# Plot with ggplot2
+ggplot(alpha_data, aes(x = value, fill = distribution)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("blue", "green")) +
+  labs(title = "Prior vs Posterior Distributions of Alpha",
+       subtitle = "Model has learnt - posterior has become more peaked, 
+and is within the prior's range.",
+       x = "Alpha",
+       y = "Density") +
+  theme_minimal()+
+  theme(plot.title = element_text(face = "bold"))
+
+```
+
+## Tau prior-post-plots
+```{r}
+# Extract the posterior samples for tau
+posterior_tau <- extract(fit_rl)$tau
+
+# Sample from the prior distribution for tau
+prior_tau <- runif(10000, 0, 10)  # uniform(0, 10) prior
+
+# Create a data frame for ggplot
+tau_data <- data.frame(
+  value = c(prior_tau, posterior_tau),
+  distribution = factor(c(rep("Prior", length(prior_tau)), rep("Posterior", length(posterior_tau))))
+)
+
+# Plot with ggplot2
+ggplot(tau_data, aes(x = value, fill = distribution)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("red", "yellow")) +
+  labs(title = "Prior vs Posterior Distributions of Tau",
+       subtitle = "Model has learnt - posterior has become more peaked, 
+and is within the prior's range.",
+       x = "Tau",
+       y = "Density") +
+  theme_minimal()+
+  theme(plot.title = element_text(face = "bold"))
+
+```
+
+# Some notessssss from methods 4
+When conducting a prior-posterior check, we wanna see how the data (evidence) has updated our initial beliefs (priors) to give  new beliefs (posteriors). The extent and nature of this update can give insights into the parameter's role in the model and how it relates to the observed data. It's also important to reflect on whether the posterior distributions make sense given our understanding of the process being modeled. If the posteriors are surprising or counterintuitive, it may warrant a deeper examination of both the data and the model's structure..
+
+### Concluding on alpha
+Prior distribution: The green area represents the prior distribution for alpha, which is a beta(1, 1) distribution. This is a uniform distribution across the range [0, 1], indicating that, prior to observing the data, we assumed all values of alpha to be equally likely.
+
+Posterior distribution: The blue area represents the posterior distribution for alpha. It is centered around a value that is lower than 0.5, indicating that, after observing the data, our model has learned that lower values of alpha are more likely than lower values.
+
+Interpretation of learning rate: The data has informed the model that the learning rate (alpha) is more likely to peak around 0.3, as indicated by the posterior distribution, which is centered in the lower third of the [0, 1] range. This suggests that the agent updates its value estimates with a moderate degree of responsiveness to prediction errors, rather than with a high degree of change. The shift from a non-informative, uniform prior indicates that the observed data led to a significant update in beliefs about the learning rate, moving away from the prior assumption of all values being equally likely towards a more specific likelihood of lower alpha values.
+
+### Concluding on tau 
+Prior distribution: The yellow area represents the prior distribution for tau, which is uniform(0, 10). As with alpha, we initially considered all values of tau within this range to be equally likely.
+
+Posterior distribution: The red area represents the posterior distribution for tau. The distribution is much narrower and is centered around a value less than 2.5, indicating that the data has led the model to learn that lower values of tau are more likely.
+
+Exploration vs. exploitation interpretation: Tau influences the exploration-exploitation tradeoff in decision-making. A lower tau value suggests that the agent's choices are less exploratory and more exploitative, meaning that the agent is more likely to choose the option it currently values higher.
+
+### Prior-Posterior checks interpretation:
+Informative data: The shift from the prior to the posterior distributions in both parameters indicates that our data is informative and is significantly updating our beliefs about the parameters.
+
+Model fit: The lack of overlap between prior and posterior for tau suggests that the data has provided substantial information to update the beliefs about this parameter.
+
+Conclusions: The model has learned specific characteristics about the learning rate and the temperature parameter from the data, which can be interpreted in the context of the behavior or process we are modeling.
+
+
+# --------
+
+
+
+
+
+# ---- From the chapter
+## 4.2 Simulating data
+Here we build a new simulation of random agents with bias and noise. The code and visualization is really nothing different from last week’s exercise.
+
+```{r}
+
+pacman::p_load(tidyverse,
+        here,
+        posterior,
+        cmdstanr,
+        brms, tidybayes)
+
+trials <- 120
+
+RandomAgentNoise_f <- function(rate, noise) {
+
+  choice <- rbinom(1, 1, rate) # generating noiseless choices
+  
+  if (rbinom(1, 1, noise) == 1) {
+    choice = rbinom(1, 1, 0.5) # introducing noise
+  }
+  
+  return(choice)
+}
+
+d <- NULL
+
+for (noise in seq(0, 0.5, 0.1)) { # looping through noise levels
+
+  for (rate in seq(0, 1, 0.1)) { # looping through rate levels
+    randomChoice <- rep(NA, trials)
+    
+    for (t in seq(trials)) { # looping through trials (to make it homologous to more reactive models)
+      randomChoice[t] <- RandomAgentNoise_f(rate, noise)
+    }
+    temp <- tibble(trial = seq(trials), choice = randomChoice, rate, noise)
+    temp$cumulativerate <- cumsum(temp$choice) / seq_along(temp$choice)
+
+    if (exists("d")) {
+      d <- rbind(d, temp)
+    } else{
+      d <- temp
+    }
+  }
+}
+
+write_csv(d, "W3_randomnoise.csv")
+
+# Now we visualize it 
+p1 <- ggplot(d, aes(trial, cumulativerate, group = rate, color = rate)) + 
+  geom_line() + 
+  geom_hline(yintercept = 0.5, linetype = "dashed") + 
+  ylim(0,1) + 
+  facet_wrap(.~noise) + 
+  theme_classic()
+
+p1
+
+```
+
+## 4.3 Building our basic model in Stan
+
+N.B. Refer to the video and slides for the step by step build-up of the Stan code.
+
+Now we subset to a simple case, no noise and rate of 0.8, to focus on the Stan model. We make it into the right format for Stan, build the Stan model, and fit it.
+
+### 4.3.1 Data
+
+Here we define the data and format it for Stan. Stan likes data as a list. Why a list? Well, dataframes (now tibbles) are amazing. But they have a big drawback: they require each variable to have the same length. Lists do not have that limitation, they are more flexible. So, lists. We’ll have to learn how to live with them.
+
+```{r}
+
+d1 <- d %>% subset(noise == 0 & rate == 0.8)
+
+## Create the data. N.B. note the two variables have different lengths: 1 for n, n for h.
+data <- list(
+  n = 120,  # n of trials
+  h = d1$choice # sequence of choices (h stands for hand)
+)
+```
+
+```{r}
+
+# So now we create a an agent that interacts with d1$choice using the Rescorla-Wagner rule
+
+# Function to simulate data from a one-armed bandit using the Rescorla-Wagner model
+simulate_bandit <- function(num_trials, reward_probs, alpha) {
+  # Initialize variables
+  num_arms <- length(reward_probs)
+  values <- rep(0, num_arms)
+  choices <- numeric(num_trials)
+  rewards <- numeric(num_trials)
+  
+  # Simulation loop
+  for (trial in 1:num_trials) {
+    # Choose an arm based on current value estimates
+    choice <- sample(1:num_arms, 1)
+    choices[trial] <- choice
+    
+    # Generate reward based on chosen arm's probability
+    reward <- as.numeric(runif(1) < reward_probs[choice])
+    rewards[trial] <- reward
+    
+    # Update value estimate for chosen arm
+    prediction_error <- reward - values[choice]
+    values[choice] <- values[choice] + alpha * prediction_error
+  }
+  
+  # Return simulated choices and rewards
+  return(list(choices = choices, rewards = rewards))
+}
+
+# Set parameters
+num_trials <- 1000  # Number of trials
+reward_probs <- c(0.2, 0.8)  # Reward probabilities for each arm
+alpha <- 0.1  # Learning rate
+
+# Simulate data
+sim_data <- simulate_bandit(num_trials, reward_probs, alpha)
+
+# Plot choices and rewards over trials
+plot(1:num_trials, sim_data$rewards, type = "l", col = "blue", xlab = "Trial", ylab = "Reward", main = "Rewards over Trials")
+lines(1:num_trials, sim_data$choices, col = "red")
+legend("topright", legend = c("Rewards", "Choices"), col = c("blue", "red"), lty = 1)
+
+
+```
+

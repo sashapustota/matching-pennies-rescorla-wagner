@@ -1,4 +1,4 @@
-# Rescorla Wagner for the Matching Pennies task
+# Rescorla-Wagner for the Matching Pennies task
 
 This repository contains code and resources for modelling the dynamics of a matching-pennies game using the Rescorla-Wagner model, implemented with Stan and R. 
 

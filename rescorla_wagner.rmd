@@ -231,7 +231,7 @@ plot_dens
 
 ```
 
-# Prior / Predictive checks
+# Posterior Predictive checks
 
 ```{r}
 # Extract simulated choice data from model output
@@ -273,6 +273,48 @@ ggplot(plot_data, aes(x = trial)) +
   theme_minimal()
 
 ```
+
+# Prior Predictive checks
+```{r}
+# Extract simulated choice data from model output
+prior_choices <- extract(fit_rl)$choice_sim_prior
+
+# Calculate summary statistics or visualize these choices if you want to
+# For example, comparing the mean of the simulated choices to the observed mean
+observed_mean <- mean(data$choice)
+simulated_means <- apply(prior_choices, 
+                         2, 
+                         mean)
+
+mode<-function(x){which.max(tabulate(x))}
+
+
+modes <- numeric(ncol(prior_choices))
+
+# Loop through each column
+for (i in 1:ncol(prior_choices)){
+   
+  # calculating mode of ith column
+  mod_val <- mode(prior_choices[,i])
+  
+  # Store the mode in the 'modes' vector
+  modes[i] <- mod_val
+}
+
+sum(data$choice==modes)/data$nTrials
+plot_data <- data.frame(trial = 1:120, mode = modes, choice = data$choice)
+
+# Plot using ggplot2
+ggplot(plot_data, aes(x = trial)) +
+  geom_line(aes(y = mode, color = "Model prediction (from prior)")) +
+  scale_color_manual(values = c("Model prediction (from prior)" = "blue")) +
+  labs(title = "Model prediction from prior vs. Real Choices",
+       x = "Trial",
+       y = "Value") +
+  theme_minimal()
+```
+
+
 
 ## Alpha prior-post-plots
 

@@ -26,8 +26,9 @@ model {
 
 generated quantities {
   int<lower=1, upper=2> choice_sim[nTrials]; // defines an array choice_sim with length nTrials
+  int<lower=1, upper=2> choice_sim_prior[nTrials];
   vector[2] v_sim = rep_vector(0.5, 2); // making a vector of length 2, with 0.5 in both places
-  
+  vector[2] v_sim_prior = rep_vector(0.5, 2);
   real <lower=0, upper=1> alpha_prior;
   real <lower=0> tau_prior;
   
@@ -41,5 +42,14 @@ generated quantities {
     
     real pe_sim = reward[t] - v_sim[choice[t]];
     v_sim[choice[t]] += alpha * pe_sim; // updates only the expected value corresponding to the chosen option
+  }
+  
+    for (t in 1:nTrials) {
+      vector[2] probs = softmax(tau * v_sim_prior); // defines a vector of length 2, calculates the softmax of the product tau*v_sim, fills out the two elements (which together sum to 1)
+      choice_sim_prior[t] = categorical_rng(probs); // catgorical_rng randomly selects one of the two choices based on the probabilities contained in the probs vector (e.g. if probs = (0.3,0.7) there is 30% chance of choosing option 1, 70% chance of choosing option 2, reflecting the model's learned preferences up to trial t.
+     
+    
+      real pe_sim = reward[t] - v_sim_prior[choice[t]];
+      v_sim_prior[choice[t]] += alpha * pe_sim; // updates only the expected value corresponding to the chosen option
   }
 }

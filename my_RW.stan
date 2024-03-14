@@ -1,7 +1,7 @@
 data {
   int<lower=1> nTrials;
   int<lower=1, upper=2> choice[nTrials];
-  int<lower=-1, upper=1> reward[nTrials];
+  int<lower=0, upper=1> reward[nTrials];
   // This is the data we simulate outside of Stan - here we just provide pointers
   // to what data should be used and what it should look like.
 }

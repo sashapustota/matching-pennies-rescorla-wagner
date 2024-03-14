@@ -1,46 +1,80 @@
 data {
-  int<lower=1> nTrials;
   int<lower=1> nSubjects;
-  int<lower=1, upper=2> choice[nTrials];
-  int<lower=-1, upper=1> reward[nTrials];
-  // This is the data we simulate outside of Stan - here we just provide pointers
-  // to what data should be used and what it should look like.
+  int<lower=1> nTrials;
+  int<lower=1,upper=2> choice[nSubjects, nTrials];     
+  real<lower=0, upper=1> reward[nSubjects, nTrials]; 
+}
+
+transformed data {
+  vector[2] initV;  // initial values for V
+  initV = rep_vector(0.5, 2);
 }
 
 parameters {
-  real<lower=0, upper=1> alpha_mu;
-  real<lower=0, upper=3> tau_mu;
-  real<lower=0> alpha_sd;
-  real<lower=0> tau_sd;
+  // group-level parameters
+  real lr_mu_raw; 
+  real tau_mu_raw;
+  real<lower=0> lr_sd_raw;
+  real<lower=0> tau_sd_raw;
   
-  real<lower=0, upper=1> alpha[nSubjects];
-  real<lower=0, upper=3> tau[nSubjects];
+  // subject-level raw parameters
+  vector[nSubjects] lr_raw;
+  vector[nSubjects] tau_raw;
+}
+
+transformed parameters {
+  vector<lower=0,upper=1>[nSubjects] lr;
+  vector<lower=0,upper=3>[nSubjects] tau;
+  
+  for (s in 1:nSubjects) {
+    lr[s]  = Phi_approx( lr_mu_raw  + lr_sd_raw * lr_raw[s] );
+    tau[s] = Phi_approx( tau_mu_raw + tau_sd_raw * tau_raw[s] ) * 3;
+  }
 }
 
 model {
+  lr_mu_raw  ~ normal(0,1);
+  tau_mu_raw ~ normal(0,1);
+  lr_sd_raw  ~ cauchy(0,3);
+  tau_sd_raw ~ cauchy(0,3);
   
-  alpha_sd ~ cauchy(0,1);
-  tau_sd ~ cauchy(0,3);
-  alpha ~ normal(alpha_mu, alpha_sd);
-  tau ~ normal(tau_mu, tau_sd);
+  lr_raw  ~ normal(0,1);
+  tau_raw ~ normal(0,1);
   
   for (s in 1:nSubjects) {
-  
-  vector[2] v;
-  real pe;
-  v = rep_vector(0, 2);
-  
-    for (t in 2:nTrials) {
+    vector[2] v; 
+    real pe;    
+    v = initV;
+
+    for (t in 1:nTrials) {        
+      choice[s,t] ~ categorical_logit( tau[s] * v );
       
-        // int choice_index = choice[t] + 1;  // New variable to adjust indexing  
-        
-        // or simply choice[t] ~ categorical(softmax(tau * v))
-        choice[s,t] ~ categorical_logit(tau[s] * v);
-  
-        // prediction error
-        pe = reward[s,t] - v[choice[s,t]];
-        // value update
-        v[choice[s,t]] = v[choice[s,t]] + alpha[s] * pe;
+      pe = reward[s,t] - v[choice[s,t]];      
+      v[choice[s,t]] = v[choice[s,t]] + lr[s] * pe; 
     }
-  }
+  }    
+}
+
+generated quantities {
+  real<lower=0,upper=1> lr_mu; 
+  real<lower=0,upper=3> tau_mu;
+  
+  int y_pred[nSubjects, nTrials];
+  
+  lr_mu  = Phi_approx(lr_mu_raw);
+  tau_mu = Phi_approx(tau_mu_raw) * 3;
+  y_pred = rep_array(-999,nSubjects ,nTrials);
+  
+  { // local block
+    for (s in 1:nSubjects) {
+        vector[2] v; 
+        real pe;    
+        v = initV;
+        for (t in 1:nTrials) {        
+          y_pred[s,t] = categorical_logit_rng( tau[s] * v );          
+          pe = reward[s,t] - v[choice[s,t]];      
+          v[choice[s,t]] = v[choice[s,t]] + lr[s] * pe; 
+        }
+    }    
+  }  
 }

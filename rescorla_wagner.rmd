@@ -244,8 +244,34 @@ simulated_means <- apply(posterior_choices,
                          2, 
                          mean)
 
-print(observed_mean)
-print(mean(simulated_means))
+mode<-function(x){which.max(tabulate(x))}
+
+
+modes <- numeric(ncol(posterior_choices))
+
+# Loop through each column
+for (i in 1:ncol(posterior_choices)){
+   
+  # calculating mode of ith column
+  mod_val <- mode(posterior_choices[,i])
+  
+  # Store the mode in the 'modes' vector
+  modes[i] <- mod_val
+}
+
+sum(data$choice==modes)/data$nTrials
+plot_data <- data.frame(trial = 1:120, mode = modes, choice = data$choice)
+
+# Plot using ggplot2
+ggplot(plot_data, aes(x = trial)) +
+  geom_line(aes(y = mode, color = "Model prediction"), linetype = "dotted") +
+  geom_line(aes(y = choice, color = "Real Choice")) +
+  scale_color_manual(values = c("Model prediction" = "blue", "Real Choice" = "red")) +
+  labs(title = "Model prediction vs. Real Choices",
+       x = "Trial",
+       y = "Value") +
+  theme_minimal()
+
 ```
 
 ## Alpha prior-post-plots

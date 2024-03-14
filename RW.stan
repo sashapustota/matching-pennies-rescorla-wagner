@@ -39,7 +39,7 @@ generated quantities {
     choice_sim[t] = categorical_rng(probs); // catgorical_rng randomly selects one of the two choices based on the probabilities contained in the probs vector (e.g. if probs = (0.3,0.7) there is 30% chance of choosing option 1, 70% chance of choosing option 2, reflecting the model's learned preferences up to trial t.
     // we btw use categorical_rng here instead of categorical_logit (as in the model block) bc we're interested here in generating new data (simulate choices) from the model based on the posterior distributions.
     
-    real pe_sim = reward[t] - v_sim[choice_sim[t]];
-    v_sim[choice_sim[t]] += alpha * pe_sim; // updates only the expected value corresponding to the chosen option
+    real pe_sim = reward[t] - v_sim[choice[t]];
+    v_sim[choice[t]] += alpha * pe_sim; // updates only the expected value corresponding to the chosen option
   }
 }
